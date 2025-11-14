@@ -36,7 +36,11 @@ public:
         if (!failBuffer.loadFromFile("Media/error1.wav")) {
             std::cerr << "Failed to load fail sound\n";
             return false;
-        }        
+        }  
+        if (!hitBuffer.loadFromFile("Media/New Assets/BulletHit.wav")) {
+            std::cerr << "Failed to load fail sound\n";
+            return false;
+        }
         if (!pressBuffer.loadFromFile("Media/press.wav")) {
             std::cerr << "Failed to load fail sound\n";
             return false;
@@ -47,6 +51,8 @@ public:
         victorySound.setVolume(110.0f);
         failSound.setBuffer(failBuffer);
         failSound.setVolume(110.0f);        
+        hitSound.setBuffer(hitBuffer);
+        hitSound.setVolume(50);
         pressSound.setBuffer(pressBuffer);
         pressSound.setVolume(50);
         
@@ -74,7 +80,11 @@ public:
 
     void playFailSound() {
         failSound.play();
-    }    
+    }  
+
+    void playhitSound() {
+        hitSound.play();
+    }
     
     void playPressSound() {
         pressSound.play();
@@ -85,9 +95,11 @@ private:
     sf::Music introMusic;
     sf::SoundBuffer victoryBuffer;
     sf::SoundBuffer failBuffer;
+	sf::SoundBuffer hitBuffer;
     sf::SoundBuffer pressBuffer;
     sf::Sound victorySound;
     sf::Sound failSound;
+    sf::Sound hitSound;
     sf::Sound pressSound;
 };
 
@@ -162,9 +174,282 @@ private:
     }
 };
 
+struct Enemy {
+    sf::Sprite sprite;
+	float lifeTime = 0.0f;
+    bool alive = true;
+};
+
+class ShooterGame {
+public:
+    ShooterGame(AudioManager& audioMgr, TextureManager& txtMgr)
+        : audioManager(audioMgr), textureManager(txtMgr)
+    {
+        loadBackground();
+        loadTextures();
+
+        windowSize = sf::Vector2f(1920, 1080);
+
+        sf::Mouse::setPosition(sf::Vector2i(windowSize.x / 2, windowSize.y / 2));
+
+		if (!font.loadFromFile("Media/Sansation.ttf")) {
+			std::cerr << "Failed to load font!\n";
+		}
+
+        if (!skullTexture.loadFromFile("Media/Skull.png")) {
+            std::cerr << "Failed to load logo\n";
+        }
+
+        skull.setTexture(skullTexture);
+        //skull.setColor(sf::Color(234, 239, 44, 150));
+        skull.setScale(0.15, 0.15);
+        skull.setPosition(-50, 920);
+
+        scoreText.setFont(font);
+        scoreText.setCharacterSize(55);
+        scoreText.setFillColor(sf::Color::White);
+        scoreText.setPosition(1500, 10);
+
+		hpText.setFont(font);
+		hpText.setCharacterSize(35);
+		hpText.setFillColor(sf::Color::White);
+		hpText.setPosition(20, 12);
+		hpText.setString("HP");
+        healthBarBack.setSize(sf::Vector2f(300, 30));
+        healthBarBack.setFillColor(sf::Color(80, 80, 80));  
+        healthBarBack.setPosition(80, 20);
+
+        healthBarFront.setSize(sf::Vector2f(300, 30));
+        healthBarFront.setFillColor(sf::Color(200, 50, 50)); 
+        healthBarFront.setPosition(80, 20);
+
+    }
+
+    void loadBackground() {
+        sf::Vector2f size;
+        if (!backgroundTexture.loadFromFile("Media/New Assets/AimlabBG.png")) {
+            std::cerr << "Failed to load background\n";
+        }
+        background.setTexture(backgroundTexture);
+        background.setColor(sf::Color(255, 255, 255, 100));
+        background.setScale(1, 1);
+        background.setPosition(0, 0);
+
+
+	}
+
+    void loadPrompt()
+    {
+        if (!font.loadFromFile("Media/Sansation.ttf")) {
+            std::cerr << "Failed to load font\n";
+        }
+
+        promptText.setFont(font);
+        promptText.setCharacterSize(50);
+        promptText.setFillColor(sf::Color::Yellow);
+        promptText.setPosition(220, 940);
+
+        promptText.setString("Press Space to Continue");
+    }
+
+    void loadTextures() {
+        if (!enemyTexture.loadFromFile("Media/New Assets/Enemy.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+        if (!crosshairTexture.loadFromFile("Media/New Assets/Crosshair.png")) {
+            std::cerr << "Failed to load crosshair texture\n";
+        }
+
+        crosshair.setTexture(crosshairTexture);
+        crosshair.setOrigin(
+            crosshairTexture.getSize().x / 2,
+            crosshairTexture.getSize().y / 2
+        );
+		crosshair.setScale(0.1f, 0.1f);
+
+    }
+
+    void update(float deltaTime, sf::RenderWindow& window)
+    {
+        if (!textureManager.isComplete()) {
+            skullAlpha += fadeDirection * deltaTime * 100;
+            if (skullAlpha >= 255 || skullAlpha <= 0) {
+                fadeDirection *= -1;
+            }
+            skull.setColor(sf::Color(255, 255, 255, static_cast<sf::Uint8>(skullAlpha)));
+        }
+        else
+        {
+            loadPrompt();
+        }
+
+        spawnTimer += deltaTime;
+        if (spawnTimer >= spawnInterval) {
+            spawnEnemy();
+            spawnTimer = 0;
+        }
+
+        spawnInterval -= 0.0001f;
+
+
+        for (auto& enemy : enemies) {
+            if (!enemy.alive) continue;
+
+            enemy.lifeTime += deltaTime;
+
+            if (enemy.lifeTime >= 2.0f) {
+                enemy.alive = false;
+                currentHealth -= 10;     
+                
+            }
+        }
+
+        if (currentHealth < 0) {
+            currentHealth = 0;
+            currentHealth = maxHealth;
+			score = 0;
+			spawnInterval = 1.0f;
+        }
+
+
+        enemies.erase(
+            std::remove_if(enemies.begin(), enemies.end(),
+                [](const Enemy& e) { return !e.alive; }),
+            enemies.end()
+        );
+
+        float ratio = static_cast<float>(currentHealth) / maxHealth;
+        healthBarFront.setSize(sf::Vector2f(300 * ratio, 30));
+
+        scoreText.setString("Score: " + std::to_string(score));
+
+        updateCrosshair(window);
+    }
+
+
+    void draw(sf::RenderWindow& window) {
+        window.draw(background);
+
+        for (auto& enemy : enemies) {
+            if (enemy.alive)
+                window.draw(enemy.sprite);
+        }
+
+        window.draw(crosshair);
+		window.draw(scoreText);
+
+        window.draw(skull);
+        window.draw(promptText);
+
+		window.draw(hpText);
+
+        window.draw(healthBarBack);
+        window.draw(healthBarFront);
+
+    }
+
+    void handleMouseClick(sf::RenderWindow& window) {
+        sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+        sf::Vector2f worldPos(mousePos.x, mousePos.y);
+
+        for (auto& enemy : enemies) {
+            if (!enemy.alive) continue;
+
+            if (enemy.sprite.getGlobalBounds().contains(worldPos)) {
+                enemy.alive = false;
+                audioManager.playhitSound();
+                score++;
+            }
+        }
+    }
+
+    void handleInput(sf::Keyboard::Key key) {
+        std::map<sf::Keyboard::Key, std::string> keyMap = {
+            {sf::Keyboard::Space, "Space"}
+        };
+
+        audioManager.playPressSound();
+
+        if (keyMap[key] == "Space" && textureManager.isComplete())
+        {
+            isExiting = true;
+        }
+    }
+
+    bool exitGame() { return isExiting; }
+
+private:
+    std::vector<Enemy> enemies;
+    sf::Texture enemyTexture;
+
+    float spawnInterval = 1.0f;
+    float spawnTimer = 0.0f;
+
+	bool isExiting = false;
+
+    sf::Vector2f windowSize;
+
+    void spawnEnemy() {
+        Enemy e;
+        e.sprite.setTexture(enemyTexture);
+
+        // center origin so scale + hitbox match
+        e.sprite.setOrigin(
+            enemyTexture.getSize().x / 2,
+            enemyTexture.getSize().y / 2
+        );
+
+        float x = randomFloat(100, windowSize.x - 100);
+        float y = randomFloat(200, windowSize.y - 200);
+
+        e.sprite.setPosition(x, y);
+        e.sprite.setScale(0.15f, 0.15f); // smaller enemy
+
+        enemies.push_back(e);
+    }
+
+
+    float randomFloat(float min, float max) {
+        return min + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (max - min)));
+    }
+
+    sf::Texture crosshairTexture;
+    sf::Sprite crosshair;
+
+    void updateCrosshair(sf::RenderWindow& window) {
+        sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+        crosshair.setPosition(static_cast<float>(mousePos.x), static_cast<float>(mousePos.y));
+    }
+
+    int maxHealth = 100;
+    int currentHealth = 100;
+
+    sf::RectangleShape healthBarBack;
+    sf::RectangleShape healthBarFront;
+
+    sf::Texture skullTexture;
+    sf::Sprite skull;
+    float skullAlpha = 0;
+    int fadeDirection = 1;
+
+    sf::Texture backgroundTexture;
+    sf::Sprite background;
+
+    sf::Text hpText;
+    sf::Text scoreText;
+    sf::Text promptText;
+    sf::Font font;
+
+    AudioManager& audioManager;
+    TextureManager& textureManager;
+
+    int score = 0;
+
+};
+
 class StratagemGame {
 public:
-    StratagemGame(AudioManager& audioMgr, TextureManager& txtMgr) : audioManager(audioMgr) , textureManager(txtMgr) {
+    StratagemGame(AudioManager& audioMgr, TextureManager& txtMgr) : audioManager(audioMgr), textureManager(txtMgr) {
         loadBackground();
         loadTextures();
         loadFont();
@@ -188,7 +473,7 @@ public:
         logo.setTexture(logoTexture);
         logo.setColor(sf::Color(234, 239, 44, 150));
         logo.setScale(0.2, 0.2);
-        logo.setPosition(746, 20); 
+        logo.setPosition(746, 20);
 
         if (!skullTexture.loadFromFile("Media/Skull.png")) {
             std::cerr << "Failed to load logo\n";
@@ -197,7 +482,7 @@ public:
         skull.setTexture(skullTexture);
         //skull.setColor(sf::Color(234, 239, 44, 150));
         skull.setScale(0.15, 0.15);
-        skull.setPosition(-50, 920); 
+        skull.setPosition(-50, 920);
 
         topBorder.setSize(sf::Vector2f(1890, 10));
         topBorder.setFillColor(sf::Color(255, 255, 255, 50));
@@ -226,7 +511,7 @@ public:
         timerText.setFont(font);
         timerText.setCharacterSize(55);
         timerText.setFillColor(sf::Color::Yellow);
-        timerText.setPosition(880, 350); 
+        timerText.setPosition(880, 350);
     }
 
     void loadPrompt()
@@ -250,7 +535,7 @@ public:
             std::mt19937 gen(rd());
             std::uniform_int_distribution<> dist(4, 8);
             std::vector<std::string> directions = { "Up", "Down", "Left", "Right" };
-            
+
             int arrowCount = 16;
             for (int i = 0; i < arrowCount; ++i) {
                 std::uniform_int_distribution<> arrowDist(0, 3);
@@ -287,7 +572,7 @@ public:
             {sf::Keyboard::D, "Right"},
             {sf::Keyboard::Space, "Space"}
         };
-        
+
         audioManager.playPressSound();
 
         if (keyMap.count(key) > 0 && currentArrowIndex < arrows.size()) {
@@ -304,7 +589,7 @@ public:
                     audioManager.playVictorySound();
                     generateNewSequence();
                 }
-            } 
+            }
             else {
                 arrows[currentArrowIndex].second.setColor(sf::Color::Red);
                 repeatSequence = true;
@@ -418,7 +703,8 @@ int main() {
 
     audioManager.playBackgroundMusic();
 
-    StratagemGame stratagemGame(audioManager, textureManager);
+    //StratagemGame stratagemGame(audioManager, textureManager);
+    ShooterGame shooterGame(audioManager, textureManager);
 
     sf::Font font;
     sf::Text fpsText;
@@ -434,7 +720,7 @@ int main() {
     fpsText.setFont(font);
     fpsText.setCharacterSize(55);
     fpsText.setFillColor(sf::Color::White);
-    fpsText.setPosition(10, 10);
+    fpsText.setPosition(1670, 1000);
 
     while (window.isOpen()) {
         sf::Event event;
@@ -443,16 +729,30 @@ int main() {
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed)
                 window.close();
-            else if (event.type == sf::Event::KeyPressed)
-                stratagemGame.handleInput(event.key.code);
+            else if (event.type == sf::Event::KeyPressed) {
+                //stratagemGame.handleInput(event.key.code);
+				shooterGame.handleInput(event.key.code);
+            } 
+            else if (event.type == sf::Event::MouseButtonPressed &&
+                event.mouseButton.button == sf::Mouse::Left)
+            {
+                shooterGame.handleMouseClick(window);
+            }
+
+
         }
 
-        stratagemGame.update(deltaTime);
+        //stratagemGame.update(deltaTime);
+		shooterGame.update(deltaTime, window);
 
         window.clear();
 
-        if (!stratagemGame.exitGame()) {
+        /*if (!stratagemGame.exitGame()) {
             stratagemGame.draw(window);
+        }*/
+
+        if (!shooterGame.exitGame()) {
+            shooterGame.draw(window);
         }
         else {
             if (sprite.getTexture() == nullptr) {
