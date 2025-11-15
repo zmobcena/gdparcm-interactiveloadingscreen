@@ -25,7 +25,7 @@ public:
             std::cerr << "Failed to load background music\n";
             return false;
         }
-        if (!introMusic.openFromFile("Media/INTRO.ogg")) {
+        if (!introMusic.openFromFile("Media/SM2.wav")) {
             std::cerr << "Failed to load intro music\n";
             return false;
         }
@@ -127,8 +127,54 @@ public:
             textures.push_back(std::move(texture));
             atlasSpriteData.push_back(spriteData);
 
-            //std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+
+        loadingComplete = true;
+    }
+
+    void loadImagesThreaded(int startIndex,
+        int totalImages,
+        const std::string& folder,
+        int threadCount)
+    {
+        textures.resize(totalImages);
+
+        int imagesPerThread = totalImages / threadCount;
+        int remainder = totalImages % threadCount;
+
+        std::vector<std::thread> threads;
+        std::atomic<int> loadedCount = 0;
+
+        auto loadRange = [&](int start, int end)
+            {
+                for (int i = start; i < end; i++)
+                {
+                    // The actual index used in the filename
+                    int realIndex = startIndex + (i - 1);
+
+                    std::string fileName = folder + "/SM2_" + std::to_string(realIndex) + ".png";
+
+                    if (!textures[i - 1].loadFromFile(fileName)) {
+                        std::cerr << "Failed to load " << fileName << "\n";
+                    }
+
+                    loadedCount++;
+                }
+            };
+
+        int start = 1;
+        for (int t = 0; t < threadCount; t++)
+        {
+            int count = imagesPerThread + (t < remainder ? 1 : 0);
+            int end = start + count;
+
+            threads.emplace_back(loadRange, start, end);
+            start = end;
+        }
+
+        for (auto& th : threads)
+            th.join();
 
         loadingComplete = true;
     }
@@ -136,6 +182,7 @@ public:
     bool isComplete() { return loadingComplete; }
     sf::Texture& getTexture(size_t index) { return textures[index]; }
     const std::vector<SpriteData>& getSprites(size_t index) const { return atlasSpriteData[index]; }
+    size_t getImageCount() const { return textures.size(); }
     size_t getAtlasCount() const { return textures.size(); }
 
 private:
@@ -683,11 +730,13 @@ private:
 };
 
 int main() {
-    sf::RenderWindow window(sf::VideoMode(1890, 1080), "Interactive Loading Screen");
+    sf::RenderWindow window(sf::VideoMode(1920, 1080), "Interactive Loading Screen");
     window.setFramerateLimit(60);
 
     TextureManager textureManager;
-    std::thread loadingThread(&TextureManager::loadAllAtlases, &textureManager, 45, "Media/Helldivers2");
+    //std::thread loadingThread(&TextureManager::loadAllAtlases, &textureManager, 45, "Media/Helldivers2");
+
+    std::thread loadingThread(&TextureManager::loadImagesThreaded, &textureManager, 0, 4101, "Media/SM2", 20);
 
     AudioManager audioManager;
     if (!audioManager.loadAudio()) {
@@ -751,7 +800,7 @@ int main() {
             stratagemGame.draw(window);
         }*/
 
-        if (!shooterGame.exitGame()) {
+        /*if (!shooterGame.exitGame()) {
             shooterGame.draw(window);
         }
         else {
@@ -777,6 +826,44 @@ int main() {
             }
 
             window.draw(sprite);
+        }*/
+
+
+        static bool playbackInitialized = false;
+        static int currentFrame = 0;
+
+        if (textureManager.isComplete())
+        {
+            if (!playbackInitialized)
+            {
+                audioManager.playIntroMusic();
+
+                sprite.setTexture(textureManager.getTexture(0));
+                //sprite.setScale(3, 3);
+                sprite.setPosition(0, 0);
+                playbackInitialized = true;
+            }
+
+            // Play image sequence
+            static int animationFrameCounter = 0;
+
+            animationFrameCounter++;
+            if (animationFrameCounter % 2 == 0)
+            {
+                currentFrame++;
+
+                if (currentFrame >= textureManager.getImageCount()) {
+                    currentFrame = 0; // loop
+                }
+
+                sprite.setTexture(textureManager.getTexture(currentFrame));
+            }
+
+            window.draw(sprite);
+        }
+        else
+        {
+            shooterGame.draw(window);
         }
 
         static sf::Clock fpsUpdateClock; 
@@ -796,7 +883,7 @@ int main() {
         window.display();
     }
 
-    loadingThread.join();
+    //loadingThread.join();
 
     return 0;
 }
