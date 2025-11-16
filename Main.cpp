@@ -40,7 +40,7 @@ public:
         }
 
         hitSound.setBuffer(hitBuffer);
-        hitSound.setVolume(40);
+        hitSound.setVolume(30);
         shootSound.setBuffer(shootBuffer);
         shootSound.setVolume(60);
         
