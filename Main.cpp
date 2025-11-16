@@ -223,9 +223,11 @@ private:
 
 struct Enemy {
     sf::Sprite sprite;
-	float lifeTime = 0.0f;
+    float lifeTime = 0.0f;     
+    float spawnTime = 0.0f;      
     bool alive = true;
 };
+
 
 class ShooterGame {
 public:
@@ -255,13 +257,18 @@ public:
         scoreText.setFont(font);
         scoreText.setCharacterSize(55);
         scoreText.setFillColor(sf::Color::White);
-        scoreText.setPosition(1500, 10);
+        scoreText.setPosition(1650, 10);
+
+		reactionTimeText.setFont(font);
+		reactionTimeText.setCharacterSize(35);
+		reactionTimeText.setFillColor(sf::Color::White);
 
 		hpText.setFont(font);
 		hpText.setCharacterSize(35);
+		hpText.setString("HP");
 		hpText.setFillColor(sf::Color::White);
 		hpText.setPosition(20, 12);
-		hpText.setString("HP");
+		 
         healthBarBack.setSize(sf::Vector2f(300, 30));
         healthBarBack.setFillColor(sf::Color(80, 80, 80));  
         healthBarBack.setPosition(80, 20);
@@ -318,6 +325,7 @@ public:
 
     void update(float deltaTime, sf::RenderWindow& window)
     {
+
         if (!textureManager.isComplete()) {
             skullAlpha += fadeDirection * deltaTime * 100;
             if (skullAlpha >= 255 || skullAlpha <= 0) {
@@ -330,9 +338,11 @@ public:
             loadPrompt();
         }
 
+        totalTime += deltaTime;
         spawnTimer += deltaTime;
         if (spawnTimer >= spawnInterval) {
             spawnEnemy();
+
             spawnTimer = 0;
         }
 
@@ -390,6 +400,8 @@ public:
 
 		window.draw(hpText);
 
+		window.draw(reactionTimeText);
+
         window.draw(healthBarBack);
         window.draw(healthBarFront);
 
@@ -403,6 +415,16 @@ public:
             if (!enemy.alive) continue;
 
             if (enemy.sprite.getGlobalBounds().contains(worldPos)) {
+
+                float reaction = (totalTime - enemy.spawnTime) * 1000; 
+
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(2) << reaction;
+
+                reactionTimeText.setString("Reaction: " + ss.str() + " ms");
+				float reactionTimeTextPosX = (windowSize.x / 2) - (reactionTimeText.getLocalBounds().width / 2);
+                reactionTimeText.setPosition(reactionTimeTextPosX, 20);
+
                 enemy.alive = false;
                 audioManager.playhitSound();
                 score++;
@@ -431,6 +453,8 @@ private:
 
     float spawnInterval = 1.0f;
     float spawnTimer = 0.0f;
+	float reactionTimer = 0.0f;
+    float totalTime = 0.0f;
 
 	bool isExiting = false;
 
@@ -440,7 +464,6 @@ private:
         Enemy e;
         e.sprite.setTexture(enemyTexture);
 
-        // center origin so scale + hitbox match
         e.sprite.setOrigin(
             enemyTexture.getSize().x / 2,
             enemyTexture.getSize().y / 2
@@ -450,10 +473,13 @@ private:
         float y = randomFloat(200, windowSize.y - 200);
 
         e.sprite.setPosition(x, y);
-        e.sprite.setScale(0.15f, 0.15f); // smaller enemy
+        e.sprite.setScale(0.15f, 0.15f);
+
+        e.spawnTime = totalTime;   
 
         enemies.push_back(e);
     }
+
 
 
     float randomFloat(float min, float max) {
@@ -482,6 +508,7 @@ private:
     sf::Texture backgroundTexture;
     sf::Sprite background;
 
+    sf::Text reactionTimeText;
     sf::Text hpText;
     sf::Text scoreText;
     sf::Text promptText;
