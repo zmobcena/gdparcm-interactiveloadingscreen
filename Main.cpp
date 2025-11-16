@@ -153,7 +153,7 @@ public:
                     // The actual index used in the filename
                     int realIndex = startIndex + (i - 1);
 
-                    std::string fileName = folder + "/SM2_" + std::to_string(realIndex) + ".png";
+                    std::string fileName = folder + "/SM2_" + std::to_string(realIndex) + ".jpg";
 
                     if (!textures[i - 1].loadFromFile(fileName)) {
                         std::cerr << "Failed to load " << fileName << "\n";
@@ -736,7 +736,7 @@ int main() {
     TextureManager textureManager;
     //std::thread loadingThread(&TextureManager::loadAllAtlases, &textureManager, 45, "Media/Helldivers2");
 
-    std::thread loadingThread(&TextureManager::loadImagesThreaded, &textureManager, 0, 4101, "Media/SM2", 20);
+    std::thread loadingThread(&TextureManager::loadImagesThreaded, &textureManager, 0, 4100, "Media/SM2_720p", 3);
 
     AudioManager audioManager;
     if (!audioManager.loadAudio()) {
@@ -839,7 +839,7 @@ int main() {
                 audioManager.playIntroMusic();
 
                 sprite.setTexture(textureManager.getTexture(0));
-                //sprite.setScale(3, 3);
+                sprite.setScale(1.5, 1.5);
                 sprite.setPosition(0, 0);
                 playbackInitialized = true;
             }
