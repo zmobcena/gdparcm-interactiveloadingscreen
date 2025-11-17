@@ -2,7 +2,6 @@
 
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
-#include <rapidjson/document.h>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -105,10 +104,11 @@ public:
             {
                 for (int i = start; i < end; i++)
                 {
-                    // The actual index used in the filename
                     int realIndex = startIndex + (i - 1);
 
                     std::string fileName = folder + "/SM2_" + std::to_string(realIndex) + ".jpg";
+
+                    std::this_thread::sleep_for(std::chrono::milliseconds(90));
 
                     if (!textures[i - 1].loadFromFile(fileName)) {
                         std::cerr << "Failed to load " << fileName << "\n";
@@ -149,6 +149,13 @@ struct Enemy {
     float lifeTime = 0.0f;     
     float spawnTime = 0.0f;      
     bool alive = true;
+
+    float flip = 1.f;
+
+    float speedY;      
+    float speedX;      
+    float startScale; 
+    float endScale;  
 };
 
 
@@ -222,7 +229,6 @@ public:
             std::cerr << "Failed to load background\n";
         }
         background.setTexture(backgroundTexture);
-        //background.setColor(sf::Color(255, 255, 255, 100));
         background.setScale(0.75, 0.75);
         background.setPosition(0, 0);
 	}
@@ -238,11 +244,29 @@ public:
         promptText.setFillColor(sf::Color::Yellow);
         promptText.setPosition(220, 940);
 
-        promptText.setString("Press Space to Continue");
+        promptText.setString("The Emperor demands your action. Press [SPACE].");
     }
 
     void loadTextures() {
+        enemyTextures.resize(4);
+
         if (!enemyTexture.loadFromFile("Media/New Assets/Enemy4.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+
+        if (!enemyTextures[0].loadFromFile("Media/New Assets/enemy1.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+
+        if (!enemyTextures[1].loadFromFile("Media/New Assets/enemy2.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+
+        if (!enemyTextures[2].loadFromFile("Media/New Assets/enemy3.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+
+        if (!enemyTextures[3].loadFromFile("Media/New Assets/enemy4.png")) {
             std::cerr << "Failed to load enemy texture\n";
         }
 
@@ -273,7 +297,7 @@ public:
             }
         }
 
-        window.setView(camera); // apply camera every frame
+        window.setView(camera);
 
         updateCrosshair(deltaTime);
 
@@ -304,10 +328,21 @@ public:
 
             enemy.lifeTime += deltaTime;
 
-            if (enemy.lifeTime >= 2.0f) {
-                enemy.alive = false;
-                currentHealth -= 10;     
-                
+            sf::Vector2f pos = enemy.sprite.getPosition();
+
+            pos.x += enemy.speedX * deltaTime; 
+            pos.y += enemy.speedY * deltaTime;
+
+            enemy.sprite.setPosition(pos);
+
+            float t = enemy.lifeTime / 40.0f; 
+            if (t > 1.f) t = 1.f;
+
+            float scale = enemy.startScale + (enemy.endScale - enemy.startScale) * t;
+            enemy.sprite.setScale(scale * enemy.flip, scale);
+
+            if (enemy.lifeTime >= 15.0f) {
+                currentHealth -= 10;
             }
         }
 
@@ -336,6 +371,12 @@ public:
     void draw(sf::RenderWindow& window) {
         window.draw(background);
 
+        std::sort(enemies.begin(), enemies.end(),
+            [](const Enemy& a, const Enemy& b) {
+                return a.spawnTime > b.spawnTime;
+            }
+        );
+
         for (auto& enemy : enemies) {
             if (enemy.alive)
                 window.draw(enemy.sprite);
@@ -347,7 +388,7 @@ public:
 
         window.draw(healthBarBack);
         window.draw(healthBarFront);
-        window.draw(healthbar);
+        //window.draw(healthbar);
 
         window.draw(scoreText);
 
@@ -364,27 +405,30 @@ public:
         sf::Vector2i mousePos = sf::Mouse::getPosition(window);
         sf::Vector2f worldPos(mousePos.x, mousePos.y);
 
-        startShake(0.15f, 10.f);
+        startShake(0.15f, 5.f);
         triggerBloom();
         audioManager.playshootSound();
 
-        for (auto& enemy : enemies) {
+        for (int i = enemies.size() - 1; i >= 0; --i) {
+            Enemy& enemy = enemies[i];
             if (!enemy.alive) continue;
 
             if (enemy.sprite.getGlobalBounds().contains(worldPos)) {
 
-                float reaction = (totalTime - enemy.spawnTime) * 1000; 
+                float reaction = (totalTime - enemy.spawnTime) * 1000;
 
                 std::ostringstream ss;
                 ss << std::fixed << std::setprecision(2) << reaction;
 
                 reactionTimeText.setString("Reaction: " + ss.str() + " ms");
-				float reactionTimeTextPosX = (windowSize.x / 2) - (reactionTimeText.getLocalBounds().width / 2);
+                float reactionTimeTextPosX = (windowSize.x / 2) - (reactionTimeText.getLocalBounds().width / 2);
                 reactionTimeText.setPosition(reactionTimeTextPosX, 20);
 
                 enemy.alive = false;
                 audioManager.playhitSound();
                 score++;
+
+                break;
             }
         }
     }
@@ -407,10 +451,11 @@ public:
 private:
     std::vector<Enemy> enemies;
     sf::Texture enemyTexture;
+    std::vector<sf::Texture> enemyTextures;
 
     int healthWidth = 508;
     int healthHeight = 50;
-    float spawnInterval = 1.0f;
+    float spawnInterval = 0.7f;
     float spawnTimer = 0.0f;
 	float reactionTimer = 0.0f;
     float totalTime = 0.0f;
@@ -462,22 +507,48 @@ private:
 
     int score = 0;
 
+    std::vector<sf::Vector2f> spawnPoints = {
+    { 200, 560 },
+    { 1100, 515 }, 
+    { 1200, 515 }, 
+    { 1400, 560 }, 
+    { 1800, 560 }  
+    };
+
     void spawnEnemy() {
         Enemy e;
-        e.sprite.setTexture(enemyTexture);
 
-        e.sprite.setOrigin(
-            enemyTexture.getSize().x / 2,
-            enemyTexture.getSize().y / 2
-        );
+        int randomIndex = rand() % enemyTextures.size();
+        e.sprite.setTexture(enemyTextures[randomIndex]);
 
-        float x = randomFloat(100, windowSize.x - 100);
-        float y = randomFloat(200, windowSize.y - 200);
+        sf::Vector2u size = enemyTextures[randomIndex].getSize();
+        e.sprite.setOrigin(size.x / 2.f, size.y / 2.f);
 
-        e.sprite.setPosition(x, y);
-        e.sprite.setScale(0.3f, 0.3f);
+        static std::default_random_engine engine{ std::random_device{}() };
+        static std::uniform_int_distribution<int> offsetDist(-80, 80);
 
-        e.spawnTime = totalTime;   
+        int pointIndex = rand() % spawnPoints.size();
+        float offset = offsetDist(engine);
+
+        sf::Vector2f pos = spawnPoints[pointIndex];
+        pos.x += offset;
+
+        e.sprite.setPosition(pos.x, pos.y);
+
+        if (pointIndex == 1 || pointIndex == 2)
+            e.startScale = 0.05f;
+        else
+            e.startScale = 0.2f;
+
+        e.endScale = 1.5f;
+
+        e.flip = (rand() % 2 == 0 ? -1.f : 1.f);
+        e.sprite.setScale(e.startScale * e.flip, e.startScale);
+
+        e.speedY = randomFloat(5.f, 8.f);
+        e.speedX = randomFloat(-5.f, 5.f);
+
+        e.spawnTime = totalTime;
 
         enemies.push_back(e);
     }
@@ -547,7 +618,7 @@ int main() {
 
     TextureManager textureManager;
 
-    std::thread loadingThread(&TextureManager::loadImagesThreaded, &textureManager, 0, 4100, "Media/SM2_720p", 2);
+    std::thread loadingThread(&TextureManager::loadImagesThreaded, &textureManager, 0, 4100, "Media/SM2_720p", 8);
 
     AudioManager audioManager;
     if (!audioManager.loadAudio()) {
@@ -620,7 +691,6 @@ int main() {
                 playbackInitialized = true;
             }
 
-            // Play image sequence
             static int animationFrameCounter = 0;
 
             animationFrameCounter++;
@@ -629,7 +699,7 @@ int main() {
                 currentFrame++;
 
                 if (currentFrame >= textureManager.getImageCount()) {
-                    currentFrame = 0; // loop
+                    currentFrame = 0;
                 }
 
                 sprite.setTexture(textureManager.getTexture(currentFrame));
