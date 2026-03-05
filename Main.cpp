@@ -2,7 +2,6 @@
 
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
-#include <rapidjson/document.h>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -25,30 +24,24 @@ public:
             std::cerr << "Failed to load background music\n";
             return false;
         }
-        if (!introMusic.openFromFile("Media/INTRO.ogg")) {
+        if (!introMusic.openFromFile("Media/SM2.wav")) {
             std::cerr << "Failed to load intro music\n";
             return false;
         }
-        if (!victoryBuffer.loadFromFile("Media/correct.wav")) {
-            std::cerr << "Failed to load victory sound\n";
-            return false;
-        }
-        if (!failBuffer.loadFromFile("Media/error1.wav")) {
+
+        if (!shootBuffer.loadFromFile("Media/New Assets/Shoot.ogg")) {
             std::cerr << "Failed to load fail sound\n";
             return false;
-        }        
-        if (!pressBuffer.loadFromFile("Media/press.wav")) {
+        }
+        if (!hitBuffer.loadFromFile("Media/New Assets/Hit.ogg")) {
             std::cerr << "Failed to load fail sound\n";
             return false;
         }
 
-
-        victorySound.setBuffer(victoryBuffer);
-        victorySound.setVolume(110.0f);
-        failSound.setBuffer(failBuffer);
-        failSound.setVolume(110.0f);        
-        pressSound.setBuffer(pressBuffer);
-        pressSound.setVolume(50);
+        hitSound.setBuffer(hitBuffer);
+        hitSound.setVolume(30);
+        shootSound.setBuffer(shootBuffer);
+        shootSound.setVolume(60);
         
         return true;
     }
@@ -56,25 +49,24 @@ public:
     void playBackgroundMusic() {
         backgroundMusic.setLoop(true);
         introMusic.stop();
-        backgroundMusic.setVolume(10.0f);
+        backgroundMusic.setVolume(40.0f);
         backgroundMusic.play();
     }
 
     void playIntroMusic() {
         introMusic.setLoop(false);
-        //introMusic.setPitch(0.8f);
         backgroundMusic.stop();
         introMusic.setVolume(60.0f);
         introMusic.play();
     }
 
-    void playVictorySound() {
-        victorySound.play();
+    void playhitSound() {
+        hitSound.play();
     }
 
-    void playFailSound() {
-        failSound.play();
-    }    
+    void playshootSound() {
+        shootSound.play();
+    }
     
     void playPressSound() {
         pressSound.play();
@@ -83,11 +75,11 @@ public:
 private:
     sf::Music backgroundMusic;
     sf::Music introMusic;
-    sf::SoundBuffer victoryBuffer;
-    sf::SoundBuffer failBuffer;
+	sf::SoundBuffer shootBuffer;
+	sf::SoundBuffer hitBuffer;
     sf::SoundBuffer pressBuffer;
-    sf::Sound victorySound;
-    sf::Sound failSound;
+    sf::Sound shootSound;
+    sf::Sound hitSound;
     sf::Sound pressSound;
 };
 
@@ -95,143 +87,155 @@ class TextureManager {
 public:
     std::atomic<bool> loadingComplete = false;
 
-    void loadAllAtlases(int atlasCount, const std::string& basePath) {
-        for (int i = 1; i <= atlasCount; ++i) {
-            std::string textureFile = basePath + "/Atlas" + std::to_string(i) + ".png";
-            std::string jsonFile = basePath + "/Atlas" + std::to_string(i) + ".json";
+    void loadImagesThreaded(int startIndex,
+        int totalImages,
+        const std::string& folder,
+        int threadCount)
+    {
+        textures.resize(totalImages);
 
-            sf::Texture texture;
-            if (!texture.loadFromFile(textureFile)) {
-                std::cerr << "Failed to load texture: " << textureFile << "\n";
-                return;
-            }
+        int imagesPerThread = totalImages / threadCount;
+        int remainder = totalImages % threadCount;
 
-            std::vector<SpriteData> spriteData = loadSpriteData(jsonFile);
-            if (spriteData.empty()) {
-                std::cerr << "Failed to load sprite data: " << jsonFile << "\n";
-                return;
-            }
+        std::vector<std::thread> threads;
+        std::atomic<int> loadedCount = 0;
 
-            textures.push_back(std::move(texture));
-            atlasSpriteData.push_back(spriteData);
+        auto loadRange = [&](int start, int end)
+            {
+                for (int i = start; i < end; i++)
+                {
+                    int realIndex = startIndex + (i - 1);
 
-            //std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    std::string fileName = folder + "/SM2_" + std::to_string(realIndex) + ".jpg";
+
+                    std::this_thread::sleep_for(std::chrono::milliseconds(90));
+
+                    if (!textures[i - 1].loadFromFile(fileName)) {
+                        std::cerr << "Failed to load " << fileName << "\n";
+                    }
+
+                    loadedCount++;
+                }
+            };
+
+        int start = 1;
+        for (int t = 0; t < threadCount; t++)
+        {
+            int count = imagesPerThread + (t < remainder ? 1 : 0);
+            int end = start + count;
+
+            threads.emplace_back(loadRange, start, end);
+            start = end;
         }
+
+        for (auto& th : threads)
+            th.join();
 
         loadingComplete = true;
     }
 
     bool isComplete() { return loadingComplete; }
     sf::Texture& getTexture(size_t index) { return textures[index]; }
-    const std::vector<SpriteData>& getSprites(size_t index) const { return atlasSpriteData[index]; }
+    size_t getImageCount() const { return textures.size(); }
     size_t getAtlasCount() const { return textures.size(); }
 
 private:
     std::vector<sf::Texture> textures;
-    std::vector<std::vector<SpriteData>> atlasSpriteData;
 
-    std::vector<SpriteData> loadSpriteData(const std::string& filename) {
-        std::vector<SpriteData> sprites;
-        std::ifstream file(filename);
-        if (!file) {
-            std::cerr << "Failed to open " << filename << "\n";
-            return sprites;
-        }
-
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        file.close();
-
-        rapidjson::Document document;
-        document.Parse(buffer.str().c_str());
-
-        if (!document.IsObject() || !document.HasMember("frames")) {
-            std::cerr << "Invalid JSON format\n";
-            return sprites;
-        }
-
-        for (auto& member : document["frames"].GetObject()) {
-            const auto& frame = member.value["frame"];
-            SpriteData sprite;
-            sprite.name = member.name.GetString();
-            sprite.rect = sf::IntRect(frame["x"].GetInt(), frame["y"].GetInt(),
-                frame["w"].GetInt(), frame["h"].GetInt());
-            sprites.push_back(sprite);
-        }
-        return sprites;
-    }
 };
 
-class StratagemGame {
+struct Enemy {
+    sf::Sprite sprite;
+    float lifeTime = 0.0f;     
+    float spawnTime = 0.0f;      
+    bool alive = true;
+
+    float flip = 1.f;
+
+    float speedY;      
+    float speedX;      
+    float startScale; 
+    float endScale;  
+};
+
+
+class ShooterGame {
 public:
-    StratagemGame(AudioManager& audioMgr, TextureManager& txtMgr) : audioManager(audioMgr) , textureManager(txtMgr) {
+    ShooterGame(AudioManager& audioMgr, TextureManager& txtMgr, sf::RenderWindow& window)
+        : audioManager(audioMgr), textureManager(txtMgr), renderWindow(window)
+    {
+        camera = window.getDefaultView();
+        originalCenter = camera.getCenter();
         loadBackground();
         loadTextures();
-        loadFont();
-        generateNewSequence();
-    }
+        initCrosshair();
 
-    void loadBackground() {
-        sf::Vector2f size;
-        if (!backgroundTexture.loadFromFile("Media/SuperEarth.png")) {
-            std::cerr << "Failed to load background\n";
-        }
-        background.setTexture(backgroundTexture);
-        background.setColor(sf::Color(255, 255, 255, 30));
-        background.setScale(0.4, 0.4);
-        background.setPosition(674, 150);
+        windowSize = sf::Vector2f(1920, 1080);
 
-        if (!logoTexture.loadFromFile("Media/Logo.png")) {
-            std::cerr << "Failed to load logo\n";
-        }
+        sf::Mouse::setPosition(sf::Vector2i(windowSize.x / 2, windowSize.y / 2));
 
-        logo.setTexture(logoTexture);
-        logo.setColor(sf::Color(234, 239, 44, 150));
-        logo.setScale(0.2, 0.2);
-        logo.setPosition(746, 20); 
+		if (!font.loadFromFile("Media/Qonquer.otf")) {
+			std::cerr << "Failed to load font!\n";
+		}
 
         if (!skullTexture.loadFromFile("Media/Skull.png")) {
             std::cerr << "Failed to load logo\n";
         }
 
         skull.setTexture(skullTexture);
-        //skull.setColor(sf::Color(234, 239, 44, 150));
-        skull.setScale(0.15, 0.15);
-        skull.setPosition(-50, 920); 
+        skull.setOrigin(
+            skullTexture.getSize().x / 2,
+            skullTexture.getSize().y / 2
+        );
+        skull.setScale(0.8, 0.8);
+        skull.setPosition(120, 950);
 
-        topBorder.setSize(sf::Vector2f(1890, 10));
-        topBorder.setFillColor(sf::Color(255, 255, 255, 50));
-        topBorder.setPosition(0, 188);
+        scoreText.setFont(font);
+        scoreText.setCharacterSize(55);
+        scoreText.setFillColor(sf::Color::White);
+        scoreText.setPosition(1650, 10);
+        scoreText.setOutlineColor(sf::Color::Black);       
+        scoreText.setOutlineThickness(1.6f);              
 
-        bottomBorder.setSize(sf::Vector2f(1890, 10));
-        bottomBorder.setFillColor(sf::Color(255, 255, 255, 50));
-        bottomBorder.setPosition(0, 880);
+		reactionTimeText.setFont(font);
+		reactionTimeText.setCharacterSize(35);
+		reactionTimeText.setFillColor(sf::Color::White);
+        reactionTimeText.setOutlineColor(sf::Color::Black);
+        reactionTimeText.setOutlineThickness(1.6f);
+
+		hpText.setFont(font);
+		hpText.setCharacterSize(60);
+		hpText.setString("HP");
+		hpText.setFillColor(sf::Color::White);
+		hpText.setPosition(50, 2);
+        hpText.setOutlineColor(sf::Color::Black);
+        hpText.setOutlineThickness(1.6f);
+		 
+        healthBarBack.setSize(sf::Vector2f(healthWidth, healthHeight));
+        healthBarBack.setFillColor(sf::Color(80, 80, 80));  
+        healthBarBack.setPosition(127, 14);
+
+        healthBarFront.setSize(sf::Vector2f(healthWidth, healthHeight));
+        healthBarFront.setFillColor(sf::Color(200, 50, 50)); 
+        healthBarFront.setPosition(127, 14);
+
+        healthbar.setScale(0.15, 0.15);
+        healthbar.setPosition(380, 38);
     }
-    void loadTextures() {
-        std::vector<std::string> directions = { "Up", "Down", "Left", "Right" };
-        for (const auto& dir : directions) {
-            sf::Texture texture;
-            if (!texture.loadFromFile("Media/Arrows/" + dir + ".png")) {
-                std::cerr << "Failed to load " << dir << " texture\n";
-            }
-            arrowTextures[dir] = std::move(texture);
+
+    void loadBackground() {
+        sf::Vector2f size;
+        if (!backgroundTexture.loadFromFile("Media/New Assets/sm2bg.jpg")) {
+            std::cerr << "Failed to load background\n";
         }
-    }
-
-    void loadFont() {
-        if (!font.loadFromFile("Media/Sansation.ttf")) {
-            std::cerr << "Failed to load font\n";
-        }
-
-        timerText.setFont(font);
-        timerText.setCharacterSize(55);
-        timerText.setFillColor(sf::Color::Yellow);
-        timerText.setPosition(880, 350); 
-    }
+        background.setTexture(backgroundTexture);
+        background.setScale(0.75, 0.75);
+        background.setPosition(0, 0);
+	}
 
     void loadPrompt()
     {
-        if (!font.loadFromFile("Media/Sansation.ttf")) {
+        if (!font.loadFromFile("Media/Qonquer.otf")) {
             std::cerr << "Failed to load font\n";
         }
 
@@ -240,86 +244,63 @@ public:
         promptText.setFillColor(sf::Color::Yellow);
         promptText.setPosition(220, 940);
 
-        promptText.setString("Press Space to Accidentally Drop a Stratagem on Your Teammates");
+        promptText.setString("The Emperor demands your action. Press [SPACE].");
     }
 
-    void generateNewSequence() {
-        if (!repeatSequence) {
-            arrows.clear();
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<> dist(4, 8);
-            std::vector<std::string> directions = { "Up", "Down", "Left", "Right" };
-            
-            int arrowCount = 16;
-            for (int i = 0; i < arrowCount; ++i) {
-                std::uniform_int_distribution<> arrowDist(0, 3);
-                std::string direction = directions[arrowDist(gen)];
-                sf::Sprite sprite;
-                sprite.setTexture(arrowTextures[direction]);
-                sprite.setColor(sf::Color::White);
-                sprite.setScale(2.5, 2.5);
-                sprite.setPosition(155 + i * 100, 500);
-                arrows.push_back({ direction, sprite });
-            }
+    void loadTextures() {
+        enemyTextures.resize(4);
+
+        if (!enemyTexture.loadFromFile("Media/New Assets/Enemy4.png")) {
+            std::cerr << "Failed to load enemy texture\n";
         }
 
-        else {
-            for (auto& arrow : arrows) {
-                arrow.second.setColor(sf::Color::White);
-            }
+        if (!enemyTextures[0].loadFromFile("Media/New Assets/enemy1.png")) {
+            std::cerr << "Failed to load enemy texture\n";
         }
-        currentArrowIndex = 0;
-        repeatSequence = false;
-        timerRunning = false;
-        elapsedTime = 0.0f;
+
+        if (!enemyTextures[1].loadFromFile("Media/New Assets/enemy2.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+
+        if (!enemyTextures[2].loadFromFile("Media/New Assets/enemy3.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+
+        if (!enemyTextures[3].loadFromFile("Media/New Assets/enemy4.png")) {
+            std::cerr << "Failed to load enemy texture\n";
+        }
+
+        if (!healthbarTexture.loadFromFile("Media/New Assets/HealthBar.png")) {
+            std::cerr << "Failed to load crosshair texture\n";
+        }
+
+        healthbar.setTexture(healthbarTexture);
+        healthbar.setOrigin(
+            healthbarTexture.getSize().x / 2,
+            healthbarTexture.getSize().y / 2
+        );
     }
 
-    void handleInput(sf::Keyboard::Key key) {
-        std::map<sf::Keyboard::Key, std::string> keyMap = {
-            {sf::Keyboard::Up, "Up"},
-            {sf::Keyboard::Down, "Down"},
-            {sf::Keyboard::Left, "Left"},
-            {sf::Keyboard::Right, "Right"},
-            {sf::Keyboard::W, "Up"},
-            {sf::Keyboard::S, "Down"},
-            {sf::Keyboard::A, "Left"},
-            {sf::Keyboard::D, "Right"},
-            {sf::Keyboard::Space, "Space"}
-        };
-        
-        audioManager.playPressSound();
-
-        if (keyMap.count(key) > 0 && currentArrowIndex < arrows.size()) {
-            if (!timerRunning) {
-                timerRunning = true;
-                clock.restart(); // Start timer
+    void update(float deltaTime, sf::RenderWindow& window)
+    {
+        if (shaking) {
+            shakeDuration -= deltaTime;
+            if (shakeDuration > 0.f) {
+                float offsetX = (rand() % 100 / 100.f - 0.5f) * shakeStrength;
+                float offsetY = (rand() % 100 / 100.f - 0.5f) * shakeStrength;
+                camera.setCenter(originalCenter.x + offsetX,
+                    originalCenter.y + offsetY);
             }
-
-            if (keyMap[key] == arrows[currentArrowIndex].first) {
-                arrows[currentArrowIndex].second.setColor(sf::Color::Yellow);
-                currentArrowIndex++;
-                if (currentArrowIndex >= arrows.size()) {
-                    elapsedTime = clock.getElapsedTime().asSeconds();
-                    audioManager.playVictorySound();
-                    generateNewSequence();
-                }
-            } 
             else {
-                arrows[currentArrowIndex].second.setColor(sf::Color::Red);
-                repeatSequence = true;
-                audioManager.playFailSound();
-                generateNewSequence();
+                shaking = false;
+                camera.setCenter(originalCenter);
             }
         }
 
-        if (keyMap[key] == "Space" && textureManager.isComplete())
-        {
-            isExiting = true;
-        }
-    }
+        window.setView(camera);
 
-    void update(float deltaTime) {
+        updateCrosshair(deltaTime);
+
         if (!textureManager.isComplete()) {
             skullAlpha += fadeDirection * deltaTime * 100;
             if (skullAlpha >= 255 || skullAlpha <= 0) {
@@ -332,77 +313,312 @@ public:
             loadPrompt();
         }
 
-        if (timerRunning) {
-            elapsedTime = clock.getElapsedTime().asSeconds();
-            timerText.setString(formatTime(elapsedTime) + "s");
+        totalTime += deltaTime;
+        spawnTimer += deltaTime;
+        if (spawnTimer >= spawnInterval) {
+            spawnEnemy();
+
+            spawnTimer = 0;
+        }
+
+        spawnInterval -= 0.0001f;
+
+        for (auto& enemy : enemies) {
+            if (!enemy.alive) continue;
+
+            enemy.lifeTime += deltaTime;
+
+            sf::Vector2f pos = enemy.sprite.getPosition();
+
+            pos.x += enemy.speedX * deltaTime; 
+            pos.y += enemy.speedY * deltaTime;
+
+            enemy.sprite.setPosition(pos);
+
+            float t = enemy.lifeTime / 40.0f; 
+            if (t > 1.f) t = 1.f;
+
+            float scale = enemy.startScale + (enemy.endScale - enemy.startScale) * t;
+            enemy.sprite.setScale(scale * enemy.flip, scale);
+
+            if (enemy.lifeTime >= 15.0f) {
+                currentHealth -= 10;
+            }
+        }
+
+        if (currentHealth < 0) {
+            currentHealth = 0;
+            currentHealth = maxHealth;
+			score = 0;
+			spawnInterval = 1.0f;
+        }
+
+        enemies.erase(
+            std::remove_if(enemies.begin(), enemies.end(),
+                [](const Enemy& e) { return !e.alive; }),
+            enemies.end()
+        );
+
+        float ratio = static_cast<float>(currentHealth) / maxHealth;
+        healthBarFront.setSize(sf::Vector2f(healthWidth * ratio, healthHeight));
+
+        scoreText.setString("Score: " + std::to_string(score));
+
+        updateCrosshair(window);
+    }
+
+
+    void draw(sf::RenderWindow& window) {
+        window.draw(background);
+
+        std::sort(enemies.begin(), enemies.end(),
+            [](const Enemy& a, const Enemy& b) {
+                return a.spawnTime > b.spawnTime;
+            }
+        );
+
+        for (auto& enemy : enemies) {
+            if (enemy.alive)
+                window.draw(enemy.sprite);
+        }
+
+		window.draw(hpText);
+
+		window.draw(reactionTimeText);
+
+        window.draw(healthBarBack);
+        window.draw(healthBarFront);
+        //window.draw(healthbar);
+
+        window.draw(scoreText);
+
+        window.draw(skull);
+        window.draw(promptText);
+
+        window.draw(topBar);
+        window.draw(bottomBar);
+        window.draw(leftBar);
+        window.draw(rightBar);
+    }
+
+    void handleMouseClick(sf::RenderWindow& window) {
+        sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+        sf::Vector2f worldPos(mousePos.x, mousePos.y);
+
+        startShake(0.15f, 5.f);
+        triggerBloom();
+        audioManager.playshootSound();
+
+        for (int i = enemies.size() - 1; i >= 0; --i) {
+            Enemy& enemy = enemies[i];
+            if (!enemy.alive) continue;
+
+            if (enemy.sprite.getGlobalBounds().contains(worldPos)) {
+
+                float reaction = (totalTime - enemy.spawnTime) * 1000;
+
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(2) << reaction;
+
+                reactionTimeText.setString("Reaction: " + ss.str() + " ms");
+                float reactionTimeTextPosX = (windowSize.x / 2) - (reactionTimeText.getLocalBounds().width / 2);
+                reactionTimeText.setPosition(reactionTimeTextPosX, 20);
+
+                enemy.alive = false;
+                audioManager.playhitSound();
+                score++;
+
+                break;
+            }
+        }
+    }
+
+    void handleInput(sf::Keyboard::Key key) {
+        std::map<sf::Keyboard::Key, std::string> keyMap = {
+            {sf::Keyboard::Space, "Space"}
+        };
+
+        audioManager.playPressSound();
+
+        if (keyMap[key] == "Space" && textureManager.isComplete())
+        {
+            isExiting = true;
         }
     }
 
     bool exitGame() { return isExiting; }
 
-    void draw(sf::RenderWindow& window) {
-        window.draw(background);
-        window.draw(logo);
-        window.draw(skull);
-        window.draw(topBorder);
-        window.draw(bottomBorder);
-        for (const auto& arrow : arrows) {
-            window.draw(arrow.second);
-        }
-        window.draw(timerText);
-        window.draw(promptText);
-    }
-
 private:
-    std::map<std::string, sf::Texture> arrowTextures;
-    std::vector<std::pair<std::string, sf::Sprite>> arrows;
-    size_t currentArrowIndex;
-    sf::Sprite arrowSprite;
-    std::string currentDirection;
+    std::vector<Enemy> enemies;
+    sf::Texture enemyTexture;
+    std::vector<sf::Texture> enemyTextures;
 
-    sf::Texture backgroundTexture;
-    sf::Sprite background;
+    int healthWidth = 508;
+    int healthHeight = 50;
+    float spawnInterval = 0.7f;
+    float spawnTimer = 0.0f;
+	float reactionTimer = 0.0f;
+    float totalTime = 0.0f;
 
-    sf::Texture logoTexture;
-    sf::Sprite logo;
+	bool isExiting = false;
+
+    sf::Vector2f windowSize;
+    sf::Texture healthbarTexture;
+    sf::Sprite healthbar;
+
+    int maxHealth = 100;
+    int currentHealth = 100;
+
+    sf::RectangleShape healthBarBack;
+    sf::RectangleShape healthBarFront;
 
     sf::Texture skullTexture;
     sf::Sprite skull;
     float skullAlpha = 0;
     int fadeDirection = 1;
 
-    sf::RectangleShape topBorder;
-    sf::RectangleShape bottomBorder;
-    bool repeatSequence = false;
-    bool assetsLoaded = false;
+    sf::Texture backgroundTexture;
+    sf::Sprite background;
 
-    sf::Clock clock;
-    float elapsedTime = 0.0f;
-    bool timerRunning = false;
-
-    sf::Font font;
-    sf::Text timerText;
+    sf::Text reactionTimeText;
+    sf::Text hpText;
+    sf::Text scoreText;
     sf::Text promptText;
+    sf::Font font;
 
-    bool isExiting = false;
+    float crosshairGap = 8.f;          
+    float crosshairBloom = 0.f;       
+    float bloomMax = 16.f;             
+    float bloomReturnSpeed = 60.f;     
+
+    sf::RectangleShape topBar, bottomBar, leftBar, rightBar;
+
+    sf::View camera;
+
+    bool shaking = false;
+    float shakeDuration = 0.f;
+    float shakeStrength = 0.f;
+
+    sf::Vector2f originalCenter;
 
     AudioManager& audioManager;
     TextureManager& textureManager;
+    sf::RenderWindow& renderWindow;
 
-    std::string formatTime(float time) {
-        std::ostringstream stream;
-        stream << std::fixed << std::setprecision(2) << time;
-        return stream.str();
+    int score = 0;
+
+    std::vector<sf::Vector2f> spawnPoints = {
+    { 200, 560 },
+    { 1100, 515 }, 
+    { 1200, 515 }, 
+    { 1400, 560 }, 
+    { 1800, 560 }  
+    };
+
+    void spawnEnemy() {
+        Enemy e;
+
+        int randomIndex = rand() % enemyTextures.size();
+        e.sprite.setTexture(enemyTextures[randomIndex]);
+
+        sf::Vector2u size = enemyTextures[randomIndex].getSize();
+        e.sprite.setOrigin(size.x / 2.f, size.y / 2.f);
+
+        static std::default_random_engine engine{ std::random_device{}() };
+        static std::uniform_int_distribution<int> offsetDist(-80, 80);
+
+        int pointIndex = rand() % spawnPoints.size();
+        float offset = offsetDist(engine);
+
+        sf::Vector2f pos = spawnPoints[pointIndex];
+        pos.x += offset;
+
+        e.sprite.setPosition(pos.x, pos.y);
+
+        if (pointIndex == 1 || pointIndex == 2)
+            e.startScale = 0.05f;
+        else
+            e.startScale = 0.2f;
+
+        e.endScale = 1.5f;
+
+        e.flip = (rand() % 2 == 0 ? -1.f : 1.f);
+        e.sprite.setScale(e.startScale * e.flip, e.startScale);
+
+        e.speedY = randomFloat(5.f, 8.f);
+        e.speedX = randomFloat(-5.f, 5.f);
+
+        e.spawnTime = totalTime;
+
+        enemies.push_back(e);
     }
 
+    float randomFloat(float min, float max) {
+        return min + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (max - min)));
+    }
+
+    void initCrosshair() {
+        topBar.setSize({ 3, 15 });
+        bottomBar.setSize({ 3, 15 });
+        leftBar.setSize({ 15, 3 });
+        rightBar.setSize({ 15, 3 });
+
+        topBar.setFillColor(sf::Color::White);
+        bottomBar.setFillColor(sf::Color::White);
+        leftBar.setFillColor(sf::Color::White);
+        rightBar.setFillColor(sf::Color::White);
+    }
+
+    void triggerBloom() {
+        crosshairBloom = bloomMax;
+    }
+
+    void updateCrosshair(float dt) {
+        if (crosshairBloom > 0) {
+            crosshairBloom -= bloomReturnSpeed * dt;
+            if (crosshairBloom < 0)
+                crosshairBloom = 0;
+        }
+    }
+
+    void updateCrosshair(sf::RenderWindow& window) {
+        sf::Vector2i mousePixel = sf::Mouse::getPosition(window);
+        sf::Vector2f center(mousePixel.x, mousePixel.y);
+
+        float gap = crosshairGap + crosshairBloom;
+
+        // Vertical bars
+        topBar.setPosition(center.x - topBar.getSize().x / 2.f,
+            center.y - gap - topBar.getSize().y);
+
+        bottomBar.setPosition(center.x - bottomBar.getSize().x / 2.f,
+            center.y + gap);
+
+        // Horizontal bars
+        leftBar.setPosition(center.x - gap - leftBar.getSize().x,
+            center.y - leftBar.getSize().y / 2.f);
+
+        rightBar.setPosition(center.x + gap,
+            center.y - rightBar.getSize().y / 2.f);
+    }
+
+    void startShake(float duration, float strength) {
+        shaking = true;
+        shakeDuration = duration;
+        shakeStrength = strength;
+    }
 };
 
 int main() {
-    sf::RenderWindow window(sf::VideoMode(1890, 1080), "Interactive Loading Screen");
+    sf::RenderWindow window(sf::VideoMode(1920, 1080), "Interactive Loading Screen");
     window.setFramerateLimit(60);
 
+    window.setMouseCursorGrabbed(true);
+    window.setMouseCursorVisible(false);
+
     TextureManager textureManager;
-    std::thread loadingThread(&TextureManager::loadAllAtlases, &textureManager, 45, "Media/Helldivers2");
+
+    std::thread loadingThread(&TextureManager::loadImagesThreaded, &textureManager, 0, 4100, "Media/SM2_720p", 8);
 
     AudioManager audioManager;
     if (!audioManager.loadAudio()) {
@@ -418,7 +634,7 @@ int main() {
 
     audioManager.playBackgroundMusic();
 
-    StratagemGame stratagemGame(audioManager, textureManager);
+    ShooterGame shooterGame(audioManager, textureManager, window);
 
     sf::Font font;
     sf::Text fpsText;
@@ -426,7 +642,7 @@ int main() {
     int frameCount = 0;
     float fps = 0.0f;
 
-    if (!font.loadFromFile("Media/Sansation.ttf")) {
+    if (!font.loadFromFile("Media/Qonquer.otf")) {
         std::cerr << "Failed to load font!\n";
         return -1;
     }
@@ -434,7 +650,9 @@ int main() {
     fpsText.setFont(font);
     fpsText.setCharacterSize(55);
     fpsText.setFillColor(sf::Color::White);
-    fpsText.setPosition(10, 10);
+    fpsText.setPosition(1760, 1000);
+    fpsText.setOutlineColor(sf::Color::Black);
+    fpsText.setOutlineThickness(1.6f);
 
     while (window.isOpen()) {
         sf::Event event;
@@ -443,40 +661,55 @@ int main() {
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed)
                 window.close();
-            else if (event.type == sf::Event::KeyPressed)
-                stratagemGame.handleInput(event.key.code);
+            else if (event.type == sf::Event::KeyPressed) {
+                //stratagemGame.handleInput(event.key.code);
+				shooterGame.handleInput(event.key.code);
+            } 
+            else if (event.type == sf::Event::MouseButtonPressed &&
+                event.mouseButton.button == sf::Mouse::Left)
+            {
+                shooterGame.handleMouseClick(window);
+            }
         }
 
-        stratagemGame.update(deltaTime);
+		shooterGame.update(deltaTime, window);
 
         window.clear();
 
-        if (!stratagemGame.exitGame()) {
-            stratagemGame.draw(window);
-        }
-        else {
-            if (sprite.getTexture() == nullptr) {
+        static bool playbackInitialized = false;
+        static int currentFrame = 0;
+
+        if (textureManager.isComplete() && shooterGame.exitGame())
+        {
+            if (!playbackInitialized)
+            {
                 audioManager.playIntroMusic();
-                sprite.setTexture(textureManager.getTexture(currentAtlas));
-                sprite.setTextureRect(textureManager.getSprites(currentAtlas)[currentIndex].rect);
-                sprite.setScale(3, 3);
+
+                sprite.setTexture(textureManager.getTexture(0));
+                sprite.setScale(1.5, 1.5);
                 sprite.setPosition(0, 0);
+                playbackInitialized = true;
             }
 
             static int animationFrameCounter = 0;
 
             animationFrameCounter++;
-            if (animationFrameCounter % 2 == 0) { 
-                currentIndex++;
-                if (currentIndex >= textureManager.getSprites(currentAtlas).size()) {
-                    currentIndex = 0;
-                    currentAtlas = (currentAtlas + 1) % textureManager.getAtlasCount();
-                    sprite.setTexture(textureManager.getTexture(currentAtlas));
+            if (animationFrameCounter % 2 == 0)
+            {
+                currentFrame++;
+
+                if (currentFrame >= textureManager.getImageCount()) {
+                    currentFrame = 0;
                 }
-                sprite.setTextureRect(textureManager.getSprites(currentAtlas)[currentIndex].rect);
+
+                sprite.setTexture(textureManager.getTexture(currentFrame));
             }
 
             window.draw(sprite);
+        }
+        else
+        {
+            shooterGame.draw(window);
         }
 
         static sf::Clock fpsUpdateClock; 
@@ -495,8 +728,6 @@ int main() {
         window.draw(fpsText); 
         window.display();
     }
-
-    loadingThread.join();
 
     return 0;
 }
