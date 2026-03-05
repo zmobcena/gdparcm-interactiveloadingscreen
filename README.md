@@ -1,8 +1,7 @@
 # Interactive Loading Screen
 
-This project features an interactive Helldivers mini-game while assets are loading in the background.  
+This project features an interactive Warhammer 40k mini-game while assets are loading in the background.  
 
 # Controls
 
-WASD or Arrow Keys
-SpaceBar
+Mouse left click
